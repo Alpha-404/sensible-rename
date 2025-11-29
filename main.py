@@ -1,4 +1,6 @@
-import ollama, glob, json, argparse
+import ollama, glob, json, argparse, os
+
+MODEL = "mistral:7b" #gemma3:4b is also alright, but a little stupid imo, mistral:7b is good but compared to gemma its pretty much the same
 
 systemPrompt = """You are a perfectionist at readability who creates concise filenames that accurately describe files, removing unnecessary parameters. Keep filenames short and simple, only removing words and not adding new ones.
 
@@ -41,15 +43,16 @@ parser = argparse.ArgumentParser(description="Refine filenames")
 parser.add_argument("directory", type=str, help="The directory to recurse under")
 args = parser.parse_args()
 
-namePairs = [] #structure is lile [[originaname, newname], [and so on for every renamed one]]
+namePairs = [] #structure is like [[originaname, newname], [and so on for every renamed one]]
 
-for filepath in glob.glob(f"{args.directory}/**/*", recursive=True):
+files = glob.glob(f"{args.directory}/**/*", recursive=True)
+for filepath in files:
     split = filepath.split("/")
     fn = split[len(split) - 1]
 
     # Generate corrections using Ollama with structured JSON output
     response = ollama.generate(
-        model="qwen2.5:7b",
+        model=MODEL,
         prompt=fn,
         system=systemPrompt,
         format="json"
@@ -65,7 +68,7 @@ for filepath in glob.glob(f"{args.directory}/**/*", recursive=True):
             counter = 0
             while counter <= 3:
                 response = ollama.generate(
-                    model="gemma3:4b",
+                    model=MODEL,
                     prompt=fn,
                     system=systemPrompt,
                     format="json"
@@ -79,14 +82,30 @@ for filepath in glob.glob(f"{args.directory}/**/*", recursive=True):
                 continue
         
         #print(json.dumps(corrections,indent=3))
+
+        extension = fn.split(".", 1)[1]
+        if not newFn.endswith(extension):
+            newFn = f"{newFn}.{extension}" #LLMS cant always be trusted
         
         print(f"ORIGINAL: {fn}")
         print(f"NEW     : {newFn}")
         print(f"Notes   : {reason}")
-        #if not input("Accept Y/n").lower().startswith("n"):
-        #    namePairs.append([fn, newFn])
+        if not input("Accept [Y/n]: ").lower().startswith("n"):
+            newFpSplit = split
+            newFpSplit[len(split) - 1] = newFn
+            newFp = "/".join(newFpSplit)
+            namePairs.append([filepath, newFp])
+            #print(namePairs)
         print("-"*50)
     except Exception as e:
         print(f"Error processing {filepath}: {e}")
 
-print(namePairs)
+percentage = round((len(namePairs)/len(files))*100, 2)
+print(f"processed {len(namePairs)}/{len(files)} files ({percentage}%)")
+
+input("Gone through all files, go over the changes above again, then, press enter to rename")
+
+for i in namePairs:
+    os.rename(i[0], i[1])
+
+print(f"Renamed {len(namePairs)} files")
